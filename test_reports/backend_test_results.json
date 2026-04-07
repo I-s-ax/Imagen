@@ -1,0 +1,222 @@
+{
+  "timestamp": "2026-04-07T18:01:30.152843",
+  "total_tests": 8,
+  "passed_tests": 8,
+  "success_rate": 1.0,
+  "test_results": [
+    {
+      "test": "API Health Check",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "status": "healthy",
+        "timestamp": "2026-04-07T18:01:29.201783+00:00"
+      }
+    },
+    {
+      "test": "Folder Info",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "path": "/app/test_images",
+        "image_count": 6,
+        "categories": {}
+      }
+    },
+    {
+      "test": "Start Analysis (Offline)",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "job_id": "ff788dfa-4e98-449b-ae61-d050b219286a",
+        "status": "processing"
+      }
+    },
+    {
+      "test": "Analysis Status",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "status": "completed",
+        "progress": 6,
+        "total": 6,
+        "current_file": "vacaciones_playa.jpg",
+        "results": {
+          "processed": 6,
+          "moved": 6,
+          "errors": 0,
+          "categories": {
+            "sin_personas": 6
+          }
+        }
+      }
+    },
+    {
+      "test": "Search by Name (vacaciones)",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "matches": [
+          {
+            "path": "/app/test_images/vacaciones_playa.jpg",
+            "name": "vacaciones_playa.jpg"
+          }
+        ],
+        "total_found": 1,
+        "moved": 0
+      }
+    },
+    {
+      "test": "Search by Example Image",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "matches": [
+          {
+            "path": "/app/test_images/test_face_1.jpg",
+            "distance": 0,
+            "similarity": 100.0
+          },
+          {
+            "path": "/app/test_images/test_face_2.jpg",
+            "distance": 0,
+            "similarity": 100.0
+          }
+        ],
+        "total_found": 2,
+        "moved": 0
+      }
+    },
+    {
+      "test": "Single Image Analysis",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "filename": "test_face_1.jpg",
+        "mode": "offline",
+        "analysis": {
+          "faces": {
+            "has_faces": false,
+            "face_count": 0,
+            "faces": []
+          },
+          "text": {
+            "has_text": false,
+            "confidence": 0.0,
+            "text_regions": 0
+          },
+          "content": {
+            "features": [
+              "simple_objects"
+            ],
+            "edge_complexity": 0.034125,
+            "color_uniformity": 0.6246
+          },
+          "category": "sin_personas"
+        }
+      }
+    },
+    {
+      "test": "List Recent Jobs",
+      "success": true,
+      "details": "Status: 200",
+      "response_data": {
+        "jobs": [
+          {
+            "id": "ff788dfa-4e98-449b-ae61-d050b219286a",
+            "folder_path": "/app/test_images",
+            "mode": "offline",
+            "status": "completed",
+            "progress": 0,
+            "total": 0,
+            "current_file": "",
+            "results": {
+              "processed": 6,
+              "moved": 6,
+              "errors": 0,
+              "categories": {
+                "sin_personas": 6
+              }
+            },
+            "created_at": "2026-04-07T18:01:29.425903+00:00",
+            "completed_at": "2026-04-07T18:01:29.466728+00:00"
+          },
+          {
+            "id": "ea137569-315b-4237-acc2-f734eebc0cf6",
+            "folder_path": "/app/test_images",
+            "mode": "offline",
+            "status": "completed",
+            "progress": 0,
+            "total": 0,
+            "current_file": "",
+            "results": {
+              "processed": 6,
+              "moved": 6,
+              "errors": 0,
+              "categories": {
+                "sin_personas": 6
+              }
+            },
+            "created_at": "2026-04-07T18:00:51.969645+00:00",
+            "completed_at": "2026-04-07T18:00:52.011092+00:00"
+          },
+          {
+            "id": "c17e2bbe-cb15-4e8b-99e0-87c3ef8c6b2b",
+            "folder_path": "/app/test_images",
+            "mode": "offline",
+            "status": "completed",
+            "progress": 0,
+            "total": 0,
+            "current_file": "",
+            "results": {
+              "processed": 6,
+              "moved": 6,
+              "errors": 0,
+              "categories": {
+                "sin_personas": 6
+              }
+            },
+            "created_at": "2026-04-07T17:59:58.420731+00:00",
+            "completed_at": "2026-04-07T17:59:58.473117+00:00"
+          },
+          {
+            "id": "dc21864d-2d9b-4591-ae94-01f6ed7fa560",
+            "folder_path": "/app/test_images",
+            "mode": "offline",
+            "status": "completed",
+            "progress": 0,
+            "total": 0,
+            "current_file": "",
+            "results": {
+              "processed": 0,
+              "moved": 0,
+              "errors": 0,
+              "categories": {}
+            },
+            "created_at": "2026-04-07T17:59:36.179251+00:00",
+            "completed_at": "2026-04-07T17:59:36.195911+00:00"
+          },
+          {
+            "id": "794a628e-9a71-4421-8732-9061df436a14",
+            "folder_path": "/app/test_images",
+            "mode": "offline",
+            "status": "completed",
+            "progress": 0,
+            "total": 0,
+            "current_file": "",
+            "results": {
+              "processed": 6,
+              "moved": 6,
+              "errors": 0,
+              "categories": {
+                "sin_personas": 6
+              }
+            },
+            "created_at": "2026-04-07T17:58:31.081726+00:00",
+            "completed_at": "2026-04-07T17:58:31.127277+00:00"
+          }
+        ]
+      }
+    }
+  ]
+}
