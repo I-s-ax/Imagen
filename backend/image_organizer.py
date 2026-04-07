@@ -92,13 +92,29 @@ class ImageAnalyzer:
         
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # Detectar rostros
+        # Mejorar contraste para mejor detección
+        gray = cv2.equalizeHist(gray)
+        
+        # Detectar rostros con parámetros más sensibles
         faces = self.face_cascade.detectMultiScale(
             gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
+            scaleFactor=1.05,
+            minNeighbors=3,
+            minSize=(20, 20),
+            flags=cv2.CASCADE_SCALE_IMAGE
         )
+        
+        # Si no encuentra, probar con LBP cascade también
+        if len(faces) == 0:
+            lbp_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_alt.xml'
+            if os.path.exists(lbp_cascade_path):
+                alt_cascade = cv2.CascadeClassifier(lbp_cascade_path)
+                faces = alt_cascade.detectMultiScale(
+                    gray,
+                    scaleFactor=1.1,
+                    minNeighbors=3,
+                    minSize=(20, 20)
+                )
         
         face_data = []
         for i, (x, y, w, h) in enumerate(faces):
