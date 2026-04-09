@@ -3,13 +3,10 @@
 Image Organizer CLI - Organizador de Imágenes con Reconocimiento Visual
 Para Termux y sistemas Linux/Windows/Mac
 
-Características:
-- Detección de rostros (offline con OpenCV, online con Gemini)
-- Reconocimiento de texto OCR
-- Detección de objetos
-- Búsqueda por imagen de ejemplo
-- Búsqueda por nombre de archivo
-- Modo offline y online
+Versión ligera compatible con Termux:
+- Usa Pillow en lugar de OpenCV cuando no está disponible
+- No requiere scikit-learn
+- Detección de rostros y texto con métodos alternativos
 """
 
 import os
@@ -22,7 +19,6 @@ import base64
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor
 import logging
 
 # Configurar logging
@@ -32,21 +28,26 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Importaciones para procesamiento de imágenes
+# Importaciones básicas (siempre disponibles)
+from PIL import Image, ImageFilter, ImageStat
+import imagehash
+
+# Intentar importar OpenCV (opcional)
 try:
     import cv2
     import numpy as np
-    from PIL import Image
-    import imagehash
-    from sklearn.cluster import DBSCAN
-    OFFLINE_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Modo offline limitado: {e}")
-    OFFLINE_AVAILABLE = False
+    OPENCV_AVAILABLE = True
+    logger.info("OpenCV disponible - usando detección avanzada")
+except ImportError:
+    OPENCV_AVAILABLE = False
+    logger.info("OpenCV no disponible - usando detección con Pillow")
 
 # Cargar variables de entorno
-from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent / '.env')
+try:
+    from dotenv import load_dotenv
+    load_dotenv(Path(__file__).parent / '.env')
+except ImportError:
+    pass  # dotenv es opcional
 
 # Extensiones de imagen soportadas
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif', '.tiff', '.tif'}
@@ -61,41 +62,60 @@ class ImageAnalyzer:
         self.face_cascade = None
         self.face_encodings_cache = {}
         
-        if OFFLINE_AVAILABLE:
-            # Cargar clasificador de rostros Haar Cascade
-            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-            self.face_cascade = cv2.CascadeClassifier(cascade_path)
-            
-            # Clasificador de ojos para mejor detección
-            self.eye_cascade = cv2.CascadeClassifier(
-                cv2.data.haarcascades + 'haarcascade_eye.xml'
-            )
+        # Cargar clasificador de rostros solo si OpenCV está disponible
+        if OPENCV_AVAILABLE:
+            try:
+                cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+                self.face_cascade = cv2.CascadeClassifier(cascade_path)
+                self.eye_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + 'haarcascade_eye.xml'
+                )
+            except Exception as e:
+                logger.warning(f"No se pudo cargar Haar Cascade: {e}")
     
-    def load_image(self, image_path: str) -> Optional[np.ndarray]:
-        """Cargar imagen usando OpenCV."""
+    def load_image_pil(self, image_path: str) -> Optional[Image.Image]:
+        """Cargar imagen usando Pillow."""
         try:
-            img = cv2.imread(str(image_path))
-            if img is None:
-                # Intentar con PIL para formatos no soportados directamente
-                pil_img = Image.open(image_path).convert('RGB')
-                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            return img
+            return Image.open(image_path).convert('RGB')
         except Exception as e:
             logger.error(f"Error cargando imagen {image_path}: {e}")
             return None
     
+    def load_image_cv2(self, image_path: str):
+        """Cargar imagen usando OpenCV (si está disponible)."""
+        if not OPENCV_AVAILABLE:
+            return None
+        try:
+            img = cv2.imread(str(image_path))
+            if img is None:
+                # Fallback con PIL
+                pil_img = Image.open(image_path).convert('RGB')
+                img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            return img
+        except Exception as e:
+            logger.error(f"Error cargando imagen con OpenCV {image_path}: {e}")
+            return None
+    
     def detect_faces_offline(self, image_path: str) -> Dict:
-        """Detectar rostros usando OpenCV (offline)."""
-        img = self.load_image(image_path)
+        """Detectar rostros - usa OpenCV si disponible, sino método alternativo."""
+        
+        # Método 1: OpenCV (más preciso)
+        if OPENCV_AVAILABLE and self.face_cascade is not None:
+            return self._detect_faces_opencv(image_path)
+        
+        # Método 2: Detección heurística con Pillow (fallback)
+        return self._detect_faces_heuristic(image_path)
+    
+    def _detect_faces_opencv(self, image_path: str) -> Dict:
+        """Detectar rostros usando OpenCV."""
+        img = self.load_image_cv2(image_path)
         if img is None:
             return {'has_faces': False, 'face_count': 0, 'faces': []}
         
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # Mejorar contraste para mejor detección
         gray = cv2.equalizeHist(gray)
         
-        # Detectar rostros con parámetros más sensibles
+        # Detectar rostros
         faces = self.face_cascade.detectMultiScale(
             gray,
             scaleFactor=1.05,
@@ -104,26 +124,25 @@ class ImageAnalyzer:
             flags=cv2.CASCADE_SCALE_IMAGE
         )
         
-        # Si no encuentra, probar con LBP cascade también
+        # Intentar con cascade alternativo si no encuentra
         if len(faces) == 0:
-            lbp_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_alt.xml'
-            if os.path.exists(lbp_cascade_path):
-                alt_cascade = cv2.CascadeClassifier(lbp_cascade_path)
-                faces = alt_cascade.detectMultiScale(
-                    gray,
-                    scaleFactor=1.1,
-                    minNeighbors=3,
-                    minSize=(20, 20)
+            try:
+                alt_cascade = cv2.CascadeClassifier(
+                    cv2.data.haarcascades + 'haarcascade_frontalface_alt.xml'
                 )
+                faces = alt_cascade.detectMultiScale(
+                    gray, scaleFactor=1.1, minNeighbors=3, minSize=(20, 20)
+                )
+            except:
+                pass
         
         face_data = []
         for i, (x, y, w, h) in enumerate(faces):
-            # Extraer región del rostro para crear encoding
             face_roi = gray[y:y+h, x:x+w]
-            face_hash = self._compute_face_hash(face_roi)
+            face_hash = self._compute_face_hash_cv2(face_roi)
             face_data.append({
                 'id': i,
-                'bbox': (x, y, w, h),
+                'bbox': [int(x), int(y), int(w), int(h)],
                 'hash': face_hash
             })
         
@@ -133,90 +152,177 @@ class ImageAnalyzer:
             'faces': face_data
         }
     
-    def _compute_face_hash(self, face_roi: np.ndarray) -> str:
-        """Computar hash único para un rostro."""
-        # Normalizar tamaño
+    def _detect_faces_heuristic(self, image_path: str) -> Dict:
+        """Detección heurística de rostros usando Pillow (fallback)."""
+        img = self.load_image_pil(image_path)
+        if img is None:
+            return {'has_faces': False, 'face_count': 0, 'faces': []}
+        
+        # Análisis de colores de piel típicos
+        skin_pixels = 0
+        total_pixels = 0
+        
+        # Reducir tamaño para análisis más rápido
+        img_small = img.resize((100, 100))
+        pixels = list(img_small.getdata())
+        
+        for r, g, b in pixels:
+            total_pixels += 1
+            # Rango de colores de piel (aproximado)
+            if self._is_skin_color(r, g, b):
+                skin_pixels += 1
+        
+        skin_ratio = skin_pixels / total_pixels if total_pixels > 0 else 0
+        
+        # Si hay suficiente color de piel, probablemente hay rostros
+        has_faces = skin_ratio > 0.15
+        face_count = 1 if has_faces else 0
+        
+        face_data = []
+        if has_faces:
+            face_hash = str(imagehash.phash(img))
+            face_data.append({
+                'id': 0,
+                'bbox': [0, 0, img.width, img.height],
+                'hash': face_hash
+            })
+        
+        return {
+            'has_faces': has_faces,
+            'face_count': face_count,
+            'faces': face_data,
+            'method': 'heuristic',
+            'skin_ratio': round(skin_ratio, 3)
+        }
+    
+    def _is_skin_color(self, r: int, g: int, b: int) -> bool:
+        """Determinar si un color RGB es tono de piel."""
+        # Reglas para detectar tonos de piel (varios tonos)
+        if r > 95 and g > 40 and b > 20:
+            if max(r, g, b) - min(r, g, b) > 15:
+                if abs(r - g) > 15 and r > g and r > b:
+                    return True
+        # Tonos más oscuros
+        if r > 60 and g > 40 and b > 30:
+            if r > g > b:
+                return True
+        return False
+    
+    def _compute_face_hash_cv2(self, face_roi) -> str:
+        """Computar hash de rostro con OpenCV."""
         face_resized = cv2.resize(face_roi, (128, 128))
-        # Crear hash basado en características
         pil_face = Image.fromarray(face_resized)
         return str(imagehash.phash(pil_face))
     
     def detect_text_offline(self, image_path: str) -> Dict:
-        """Detectar si hay texto en la imagen (método heurístico)."""
-        img = self.load_image(image_path)
+        """Detectar si hay texto en la imagen."""
+        
+        if OPENCV_AVAILABLE:
+            return self._detect_text_opencv(image_path)
+        
+        return self._detect_text_pillow(image_path)
+    
+    def _detect_text_opencv(self, image_path: str) -> Dict:
+        """Detectar texto usando OpenCV."""
+        img = self.load_image_cv2(image_path)
         if img is None:
             return {'has_text': False, 'confidence': 0}
         
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # Aplicar umbral adaptativo para resaltar texto
+        # Umbral adaptativo para resaltar texto
         thresh = cv2.adaptiveThreshold(
             gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, 11, 2
         )
         
-        # Buscar contornos que podrían ser texto
+        # Buscar contornos
         contours, _ = cv2.findContours(
             thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
         )
         
-        # Filtrar contornos por características de texto
         text_like_contours = 0
         for cnt in contours:
             x, y, w, h = cv2.boundingRect(cnt)
             aspect_ratio = w / float(h) if h > 0 else 0
             area = cv2.contourArea(cnt)
             
-            # Características típicas de caracteres de texto
             if 0.1 < aspect_ratio < 10 and 50 < area < 5000:
                 text_like_contours += 1
         
-        # Umbral para considerar que hay texto
         has_text = text_like_contours > 20
         confidence = min(text_like_contours / 100, 1.0)
         
         return {
             'has_text': has_text,
-            'confidence': float(confidence),
+            'confidence': float(round(confidence, 3)),
             'text_regions': int(text_like_contours)
         }
     
+    def _detect_text_pillow(self, image_path: str) -> Dict:
+        """Detectar texto usando Pillow (análisis de contraste)."""
+        img = self.load_image_pil(image_path)
+        if img is None:
+            return {'has_text': False, 'confidence': 0}
+        
+        # Convertir a escala de grises
+        gray = img.convert('L')
+        
+        # Detectar bordes (texto tiene muchos bordes nítidos)
+        edges = gray.filter(ImageFilter.FIND_EDGES)
+        
+        # Calcular estadísticas de la imagen de bordes
+        stat = ImageStat.Stat(edges)
+        edge_mean = stat.mean[0]
+        edge_stddev = stat.stddev[0]
+        
+        # Alto contraste y muchos bordes = probablemente texto
+        has_text = edge_mean > 30 and edge_stddev > 40
+        confidence = min((edge_mean / 100) * (edge_stddev / 60), 1.0)
+        
+        return {
+            'has_text': has_text,
+            'confidence': float(round(confidence, 3)),
+            'method': 'pillow',
+            'edge_mean': float(round(edge_mean, 2)),
+            'edge_stddev': float(round(edge_stddev, 2))
+        }
+    
     def analyze_image_content_offline(self, image_path: str) -> Dict:
-        """Analizar contenido general de la imagen (offline)."""
-        img = self.load_image(image_path)
+        """Analizar contenido general de la imagen."""
+        img = self.load_image_pil(image_path)
         if img is None:
             return {'category': 'unknown', 'features': []}
         
         features = []
         
         # Analizar colores dominantes
-        pixels = img.reshape(-1, 3)
-        colors, counts = np.unique(pixels, axis=0, return_counts=True)
-        dominant_colors = colors[counts.argsort()[-5:]]
+        img_small = img.resize((50, 50))
+        colors = img_small.getcolors(2500)
         
-        # Detectar si es mayormente un color (imagen simple)
-        total_pixels = len(pixels)
-        max_color_ratio = counts.max() / total_pixels
+        if colors:
+            colors.sort(key=lambda x: x[0], reverse=True)
+            total = sum(c[0] for c in colors)
+            top_ratio = colors[0][0] / total if total > 0 else 0
+            
+            if top_ratio > 0.7:
+                features.append('solid_color')
         
-        if max_color_ratio > 0.7:
-            features.append('solid_color')
+        # Detectar complejidad
+        edges = img.convert('L').filter(ImageFilter.FIND_EDGES)
+        stat = ImageStat.Stat(edges)
+        complexity = stat.mean[0]
         
-        # Detectar bordes para objetos
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 50, 150)
-        edge_ratio = np.count_nonzero(edges) / edges.size
-        
-        if edge_ratio > 0.1:
+        if complexity > 50:
             features.append('complex_objects')
-        elif edge_ratio > 0.02:
+        elif complexity > 15:
             features.append('simple_objects')
         else:
             features.append('minimal_content')
         
         return {
             'features': features,
-            'edge_complexity': float(edge_ratio),
-            'color_uniformity': float(max_color_ratio)
+            'complexity': float(round(complexity, 2))
         }
     
     async def analyze_image_online(self, image_path: str) -> Dict:
@@ -226,49 +332,39 @@ class ImageAnalyzer:
         
         from emergentintegrations.llm.chat import LlmChat, UserMessage, FileContentWithMimeType
         
-        # Determinar mime type
         ext = Path(image_path).suffix.lower()
         mime_types = {
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.png': 'image/png',
-            '.webp': 'image/webp',
-            '.gif': 'image/gif'
+            '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+            '.png': 'image/png', '.webp': 'image/webp', '.gif': 'image/gif'
         }
         mime_type = mime_types.get(ext, 'image/jpeg')
         
-        # Crear chat con Gemini
         chat = LlmChat(
             api_key=self.api_key,
-            session_id=f"img-analysis-{hashlib.md5(image_path.encode()).hexdigest()[:8]}",
-            system_message="""Eres un analizador de imágenes. Analiza la imagen y responde SOLO en formato JSON con esta estructura exacta:
+            session_id=f"img-{hashlib.md5(image_path.encode()).hexdigest()[:8]}",
+            system_message="""Analiza la imagen y responde SOLO en JSON:
 {
     "has_faces": true/false,
     "face_count": número,
     "has_text": true/false,
-    "text_content": "texto detectado o null",
     "has_people": true/false,
-    "objects": ["lista", "de", "objetos"],
+    "objects": ["lista"],
     "category": "rostros|texto|objetos|sin_personas|mixto",
     "description": "descripción breve"
 }"""
         ).with_model("gemini", "gemini-2.5-flash")
         
-        # Preparar imagen
         image_file = FileContentWithMimeType(
             file_path=str(image_path),
             mime_type=mime_type
         )
         
-        # Enviar mensaje
         response = await chat.send_message(UserMessage(
             text="Analiza esta imagen y devuelve el JSON.",
             file_contents=[image_file]
         ))
         
-        # Parsear respuesta JSON
         try:
-            # Limpiar respuesta de markdown si existe
             response_text = response.strip()
             if response_text.startswith('```'):
                 response_text = response_text.split('\n', 1)[1]
@@ -276,13 +372,9 @@ class ImageAnalyzer:
             return json.loads(response_text)
         except json.JSONDecodeError:
             return {
-                'has_faces': False,
-                'has_text': False,
-                'has_people': False,
-                'objects': [],
-                'category': 'unknown',
-                'description': response,
-                'raw_response': response
+                'has_faces': False, 'has_text': False, 'has_people': False,
+                'objects': [], 'category': 'unknown',
+                'description': response, 'raw_response': response
             }
     
     def compute_image_hash(self, image_path: str) -> str:
@@ -319,7 +411,7 @@ class ImageOrganizer:
             'errors': 0,
             'categories': {}
         }
-        self.face_groups = {}  # Agrupar rostros similares
+        self.face_groups = {}
     
     def get_images(self) -> List[Path]:
         """Obtener todas las imágenes del directorio."""
@@ -346,7 +438,6 @@ class ImageOrganizer:
             
             dest_path = dest_folder / image_path.name
             
-            # Manejar nombres duplicados
             counter = 1
             while dest_path.exists():
                 stem = image_path.stem
@@ -374,21 +465,15 @@ class ImageOrganizer:
                 if progress_callback:
                     progress_callback(i + 1, total, img_path.name)
                 
-                # Analizar rostros
                 face_result = self.analyzer.detect_faces_offline(str(img_path))
-                
-                # Analizar texto
                 text_result = self.analyzer.detect_text_offline(str(img_path))
                 
-                # Determinar categoría
                 category = self._determine_category_offline(face_result, text_result)
                 
-                # Si hay rostros, agrupar por persona
                 subcategory = None
-                if category == 'rostros' and face_result['faces']:
+                if category == 'rostros' and face_result.get('faces'):
                     subcategory = self._assign_face_group(face_result['faces'])
                 
-                # Mover imagen
                 if self.move_image(img_path, category, subcategory):
                     self.results['moved'] += 1
                     self.results['categories'][category] = self.results['categories'].get(category, 0) + 1
@@ -414,23 +499,18 @@ class ImageOrganizer:
                 if progress_callback:
                     progress_callback(i + 1, total, img_path.name)
                 
-                # Analizar con Gemini
                 result = await self.analyzer.analyze_image_online(str(img_path))
                 
-                # Determinar categoría
                 category = result.get('category', 'desconocido')
                 if category not in ['rostros', 'texto', 'objetos', 'sin_personas', 'mixto']:
                     category = 'desconocido'
                 
-                # Si hay rostros, crear subcarpeta
                 subcategory = None
                 if category == 'rostros' and result.get('face_count', 0) > 0:
-                    # Usar hash de imagen para agrupar
                     face_data = self.analyzer.detect_faces_offline(str(img_path))
-                    if face_data['faces']:
+                    if face_data.get('faces'):
                         subcategory = self._assign_face_group(face_data['faces'])
                 
-                # Mover imagen
                 if self.move_image(img_path, category, subcategory):
                     self.results['moved'] += 1
                     self.results['categories'][category] = self.results['categories'].get(category, 0) + 1
@@ -455,7 +535,6 @@ class ImageOrganizer:
         elif has_text:
             return 'texto'
         else:
-            # Si no hay rostros, es sin_personas u objetos
             return 'sin_personas'
     
     def _assign_face_group(self, faces: List[Dict]) -> str:
@@ -463,17 +542,14 @@ class ImageOrganizer:
         if not faces:
             return "persona_desconocida"
         
-        # Usar el hash del primer rostro
         face_hash = faces[0].get('hash', '')
         if not face_hash:
             return "persona_desconocida"
         
-        # Buscar grupo existente similar
         for group_name, group_hash in self.face_groups.items():
             if self.analyzer.compare_images(face_hash, group_hash, threshold=15):
                 return group_name
         
-        # Crear nuevo grupo
         group_num = len(self.face_groups) + 1
         group_name = f"persona_{group_num}"
         self.face_groups[group_name] = face_hash
@@ -499,11 +575,10 @@ class ImageOrganizer:
                     h2 = imagehash.hex_to_hash(img_hash)
                     distance = abs(h1 - h2)
                     if distance <= threshold:
-                        matches.append((img_path, distance))
+                        matches.append((img_path, int(distance)))
                 except:
                     continue
         
-        # Ordenar por similitud (menor distancia = más similar)
         matches.sort(key=lambda x: x[1])
         return matches
     
@@ -561,7 +636,7 @@ def progress_bar(current: int, total: int, filename: str):
 def main():
     """Función principal CLI."""
     parser = argparse.ArgumentParser(
-        description='📷 Image Organizer - Organizador de Imágenes con IA',
+        description='📷 Image Organizer - Organizador de Imágenes (Compatible con Termux)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Ejemplos de uso:
@@ -579,6 +654,12 @@ Ejemplos de uso:
   
   # Modo interactivo
   python image_organizer.py --interactive
+
+Dependencias mínimas (Termux):
+  pip install pillow imagehash
+  
+Dependencias opcionales (mejor detección):
+  pip install opencv-python
         """
     )
     
@@ -602,7 +683,9 @@ Ejemplos de uso:
     if args.verbose:
         logging.getLogger().setLevel(logging.DEBUG)
     
-    # Modo interactivo
+    # Mostrar info de dependencias
+    print(f"\n📦 OpenCV: {'✅ Disponible' if OPENCV_AVAILABLE else '❌ No disponible (usando Pillow)'}")
+    
     if args.interactive:
         run_interactive_mode()
         return
@@ -612,13 +695,11 @@ Ejemplos de uso:
         print("\n❌ Error: Debes especificar una carpeta")
         sys.exit(1)
     
-    # Verificar que la carpeta existe
     folder = Path(args.folder)
     if not folder.exists():
         print(f"❌ Error: La carpeta '{folder}' no existe")
         sys.exit(1)
     
-    # Crear organizador
     organizer = ImageOrganizer(
         source_dir=str(folder),
         mode=args.mode,
@@ -735,7 +816,7 @@ def run_interactive_mode():
             
             if matches:
                 print(f"\n✅ Encontradas {len(matches)} imágenes similares:")
-                for img, dist in matches[:20]:  # Mostrar máximo 20
+                for img, dist in matches[:20]:
                     print(f"  📷 {img.name} (distancia: {dist})")
                 
                 move = input("\n¿Mover a carpeta 'similares'? (s/n): ").strip().lower()

@@ -26,15 +26,19 @@ Crear un proyecto ejecutable por Termux que pueda reconocer rostros, objetos, ca
 
 ## Lo Implementado (Abril 2026)
 
-### CLI (image_organizer.py)
+### CLI (image_organizer.py) - Versión Ligera para Termux
+- [x] **Dependencias mínimas**: Solo requiere `pillow` e `imagehash`
+- [x] **OpenCV opcional**: Funciona con o sin OpenCV
 - [x] Organización por categorías (rostros, texto, objetos, sin_personas, mixto)
 - [x] Agrupación de rostros similares en subcarpetas persona_1, persona_2...
-- [x] Detección de texto heurística
+- [x] Detección de texto heurística (sin Tesseract)
+- [x] Detección de rostros con Pillow (fallback si no hay OpenCV)
 - [x] Búsqueda por imagen de ejemplo con umbral configurable
 - [x] Búsqueda por nombre de archivo
 - [x] Modo interactivo
-- [x] Modo offline (OpenCV) y online (Gemini)
+- [x] Modo offline (Pillow/OpenCV) y online (Gemini)
 - [x] Barra de progreso en terminal
+- [x] Eliminado scikit-learn (no necesario)
 
 ### API REST
 - [x] POST /api/analyze - Iniciar análisis en segundo plano

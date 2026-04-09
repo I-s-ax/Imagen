@@ -2,6 +2,13 @@
 """
 Script de instalación para Termux
 Ejecutar: python setup_termux.py
+
+Dependencias MÍNIMAS (funciona sin OpenCV):
+  - pillow
+  - imagehash
+
+Dependencias OPCIONALES (mejor detección):
+  - opencv-python (si se puede instalar)
 """
 
 import subprocess
@@ -29,7 +36,7 @@ def main():
     print("=" * 50)
     
     # Detectar si estamos en Termux
-    is_termux = 'com.termux' in os.environ.get('PREFIX', '')
+    is_termux = 'com.termux' in os.environ.get('PREFIX', '') or os.path.exists('/data/data/com.termux')
     
     if is_termux:
         print("\n📱 Detectado: Termux")
@@ -38,66 +45,81 @@ def main():
         run_command("pkg update -y", "Actualizando paquetes")
         run_command("pkg upgrade -y", "Actualizando sistema")
         
-        # Instalar dependencias del sistema
-        run_command("pkg install -y python python-pip", "Instalando Python")
-        run_command("pkg install -y opencv-python", "Instalando OpenCV")
+        # Instalar Python y pip
+        run_command("pkg install -y python", "Instalando Python")
+        
+        # Instalar dependencias del sistema para Pillow
         run_command("pkg install -y libjpeg-turbo libpng", "Instalando bibliotecas de imagen")
         
     else:
         print("\n💻 Detectado: Sistema estándar (Linux/Mac/Windows)")
     
-    # Instalar dependencias de Python
-    print("\n📦 Instalando dependencias de Python...")
+    # Instalar dependencias MÍNIMAS de Python (siempre funcionan)
+    print("\n📦 Instalando dependencias mínimas...")
     
-    packages = [
-        "opencv-python-headless",
+    minimal_packages = [
         "pillow",
-        "numpy",
-        "scikit-learn",
         "imagehash",
-        "python-dotenv",
-        "emergentintegrations"
     ]
     
-    for pkg in packages:
+    for pkg in minimal_packages:
         run_command(f"{sys.executable} -m pip install {pkg} --quiet", f"Instalando {pkg}")
     
+    # Intentar instalar OpenCV (opcional)
+    print("\n📦 Intentando instalar OpenCV (opcional)...")
+    opencv_installed = run_command(
+        f"{sys.executable} -m pip install opencv-python --quiet",
+        "Instalando opencv-python"
+    )
+    
+    if not opencv_installed:
+        print("   ℹ️ OpenCV no se pudo instalar - el programa funcionará con Pillow")
+    
+    # Intentar instalar python-dotenv (opcional)
+    run_command(f"{sys.executable} -m pip install python-dotenv --quiet", "Instalando python-dotenv")
+    
     # Verificar instalación
-    print("\n🔍 Verificando instalación...")
+    print("\n" + "=" * 50)
+    print("🔍 Verificando instalación...")
+    print("=" * 50)
     
-    try:
-        import cv2
-        print(f"   ✅ OpenCV: {cv2.__version__}")
-    except ImportError:
-        print("   ❌ OpenCV no instalado")
-    
+    # Verificar Pillow
     try:
         from PIL import Image
         import PIL
         print(f"   ✅ Pillow: {PIL.__version__}")
     except ImportError:
-        print("   ❌ Pillow no instalado")
+        print("   ❌ Pillow NO instalado - REQUERIDO")
+        return
     
+    # Verificar imagehash
     try:
         import imagehash
-        print("   ✅ imagehash instalado")
+        print("   ✅ imagehash: instalado")
     except ImportError:
-        print("   ❌ imagehash no instalado")
+        print("   ❌ imagehash NO instalado - REQUERIDO")
+        return
     
+    # Verificar OpenCV (opcional)
     try:
-        import numpy as np
-        print(f"   ✅ NumPy: {np.__version__}")
+        import cv2
+        print(f"   ✅ OpenCV: {cv2.__version__} (detección avanzada)")
     except ImportError:
-        print("   ❌ NumPy no instalado")
+        print("   ⚠️ OpenCV: No disponible (usando detección básica con Pillow)")
     
     print("\n" + "=" * 50)
     print("  ✅ INSTALACIÓN COMPLETADA")
     print("=" * 50)
-    print("\nUso básico:")
-    print("  python image_organizer.py /ruta/carpeta --mode offline")
-    print("  python image_organizer.py --interactive")
-    print("\nPara más ayuda:")
-    print("  python image_organizer.py --help")
+    print("\n📝 Dependencias instaladas:")
+    print("   - pillow (requerido) ✅")
+    print("   - imagehash (requerido) ✅")
+    print("   - opencv-python (opcional)")
+    
+    print("\n🚀 Uso básico:")
+    print("   python image_organizer.py /ruta/carpeta --mode offline")
+    print("   python image_organizer.py --interactive")
+    print("\n📖 Ayuda completa:")
+    print("   python image_organizer.py --help")
 
 
 if __name__ == '__main__':
